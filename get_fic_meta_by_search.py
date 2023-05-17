@@ -11,18 +11,67 @@ import requests
 from bs4 import BeautifulSoup
 
 
-test_url = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=F&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=100&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=en&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
+# This URL does a search for MP100 works in English, 
+# excluding crossovers and works under 100 words
+# and returns the list by date updated
+base_url = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=F&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=100&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=en&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
 
+"""
+page two of above looks like this:
+https://archiveofourown.org/tags/%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100%20%7C%20Mob%20Psycho%20100/works?commit=Sort+and+Filter&page=2&work_search%5Bcomplete%5D=&work_search%5Bcrossover%5D=F&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Blanguage_id%5D=en&work_search%5Bother_tag_names%5D=&work_search%5Bquery%5D=&work_search%5Bsort_column%5D=revised_at&work_search%5Bwords_from%5D=100&work_search%5Bwords_to%5D=
+
+notice &page=2 url param, means we index from 1, not 0.
+additionally, b/c parsing takes so long, i need to keep a set of story ids to dedupe
+in case someone publishes something new while i'm parsing and sets me off-by-one
+"""
+
+# This is a test search I used b/c I knew it had Anonymous and Collections examples
+# Don't use for main stat collection
 test_url_contains_anonymous = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&include_work_search%5Brating_ids%5D%5B%5D=13&include_work_search%5Brelationship_ids%5D%5B%5D=10483645&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
 
-def _request_ao3(url, page=1):
+unique_ids = set()
+
+def process_ao3_loop():
+
+    # this needs to loop until we hit the end of the searchable archive
+    # what's the best way to determine the end?
+    # could be two things -- either we get < 20 items or we get nothing
+    # whichever comes first
+
+    # todo ani, update this later to allow contributed url, not just base
+
+    page = 1
+    full_results_list = []
+    while True: 
+        page_param = '&page={page}'.format(page=page)
+        url_with_page = base_url + page_param
+        print('requesting', url_with_page)
+        res = _request_ao3(url_with_page)
+        full_results_list += res
+        
+        if not res or len(res) < 20:
+            print('last page is', page)
+            break # should mean we're done here
+        
+        page += 1
+
+    return full_results_list
+
+def _request_ao3(url):
     """
-    Makes a request to ao3, returns structured metadata list.
+    Makes a request to ao3, returns structured metadata list for page.
     """
     success = False
+    allowable_tries = 3 #if exceeds this, just give up
+    tries = 0
+
     while not success:
+        if tries >= allowable_tries:
+            break
         try:
             time.sleep(5) #need to wait 5 secs before req ao3 per TOS
+            # todo ani, need exponential backoff? let's see
+            tries += 1
             r = requests.get(url)
             if r.status_code != 200:
                 success = False
@@ -30,12 +79,22 @@ def _request_ao3(url, page=1):
                 return _parse_ao3_result_list(r.text)
         except Exception as e:
             print(str(e))
+    
+    # if we get here, something went wrong and we need to abort mission
+    # might be blocked, rate limited, or ao3 might be Having Problems
+    # or ani can't code. idk
+    print(r.status_code)
+    print(r.text)
+    sys.exit("something went horribly wrong, fix it")
 
 
 def _stat_parse_helper(stat_object, class_name):
     find_stat = stat_object.find('dd', class_=class_name)
-    find_stat = int(find_stat.text.replace(',', '')) if find_stat else 0
-    return find_stat
+    if find_stat:
+        find_stat = int(find_stat.text.replace(',', '')) if find_stat else 0
+        return find_stat
+    else:   
+        return 0
 
 
 def _parse_ao3_result_list(html_str):
@@ -44,19 +103,23 @@ def _parse_ao3_result_list(html_str):
     Things I care about: title, author, id, rating, tags, pairings, description, warnings, 
     word count, chapters, kudos, hits, comments, date published, date updated
     """
+    global unique_ids
     soup = BeautifulSoup(html_str, 'html.parser')
     work_index_group = soup.find('ol', class_="work index group")
     works = work_index_group.find_all('li', class_="work")
 
     jsons = []
     for work in works:
-        
         # basics
         header = work.div
         h4 = header.h4
         link = h4.a
         author = link.find_next().text
         id_ = link.get('href')
+        if id_ in unique_ids:
+            continue # we already have it so we can keep going
+        else:
+            unique_ids.add(id_)
         title = link.string
         is_anon = False
         is_orphan = 'orphan_account' == author
@@ -90,7 +153,7 @@ def _parse_ao3_result_list(html_str):
             freeforms = [f.a.text for f in freeforms]
         
         bq = work.find('blockquote', class_="userstuff summary")
-        summary = bq.text        
+        summary = bq.text if bq else ''  #evidently, you can have no summary      
         
         # gran series meta from summary and break it down
         series = work.find('ul', class_="series")
@@ -161,10 +224,11 @@ def _parse_ao3_result_list(html_str):
 
 def main():
     # todo ani, make this page
-    r = requests.get(test_url_contains_anonymous)
-    html = r.text
+    # r = requests.get(test_url_contains_anonymous)
+    # html = r.text
 
-    result_list = _parse_ao3_result_list(html)
+    # result_list = _parse_ao3_result_list(html)
+    result_list = process_ao3_loop()
     
     with open('outfile.json', 'w') as outfile:
         json.dump({'data': result_list}, outfile,indent=4)
