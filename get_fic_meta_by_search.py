@@ -10,27 +10,7 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-
-test_url = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=F&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=100&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=en&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
-
-def _request_ao3(url, page=1):
-    """
-    Makes a request to ao3, returns structured metadata list.
-    """
-    success = False
-    while not success:
-        try:
-            time.sleep(5) #need to wait 5 secs before req ao3 per TOS
-            r = requests.get(url)
-            if r.status_code is not 200:
-                success = False
-            else:
-                return _parse_ao3_result_list(r.text)
-        except Exception as e:
-            print(str(e))
-
-
-""""
+"""
 i want an object like this, if possible:
 
 title: title
@@ -54,6 +34,26 @@ date_updated: timestamp
 
 """
 
+
+test_url = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=F&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=100&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=en&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
+
+def _request_ao3(url, page=1):
+    """
+    Makes a request to ao3, returns structured metadata list.
+    """
+    success = False
+    while not success:
+        try:
+            time.sleep(5) #need to wait 5 secs before req ao3 per TOS
+            r = requests.get(url)
+            if r.status_code != 200:
+                success = False
+            else:
+                return _parse_ao3_result_list(r.text)
+        except Exception as e:
+            print(str(e))
+
+
 def _parse_ao3_result_list(html_str):
     """
     Uses beautiful soup to transform html into json with relevant metadata.
@@ -61,31 +61,56 @@ def _parse_ao3_result_list(html_str):
     word count, chapters, kudos, hits, comments, date published, date updated
     """
     soup = BeautifulSoup(html_str, 'html.parser')
-    # the list starts with <ol class="work index group">
-    ls = soup.findall('li', class_="work blurb group")
-    for work in ls:
+    work_index_group = soup.find('ol', class_="work index group")
+    works = work_index_group.find_all('li', class_="work")
+
+    jsons = []
+    for work in works:
         header = work.div
         link = header.h4.a
-        id = link.get('href')
+        author = link.find_next().text
+        id_ = link.get('href')
         title = link.string
-        # this is fucked
 
+        required_tags = header.find('ul', class_="required-tags")
 
-    return
+        tag_lis = required_tags.find_all('li')
+        rating = tag_lis[0].a.text
+        warnings = tag_lis[1].a.text.split(', ')
+        category = tag_lis[2].a.text.split(', ')
+        iswip = tag_lis[3].a.text == "Work in Progress"
 
+        tags_commas = work.find('ul', class_="tags commas")
+        print(tags_commas)
 
+        jsons.append({
+            "title": title,
+            "author": author,
+            "id": id_,
+            "rating": rating,
+            "warnings": warnings,
+            "category": category,
+            "iswip": iswip,
+        })
 
-
-
+    return jsons
 
 
 def main():
-    # testing
-    r = requests.get(test_url)
-    with open('outfile', 'w') as f:
-        f.write(r.text.encode('utf8'))
+    #r = requests.get(test_url)
+    #with open('outfile', 'w', encoding='utf8') as f:
+    #    f.write(r.text)
 
-main()
+    with open('outfile', 'r', encoding='utf8') as f:
+        html = f.read()
+
+    result_list = _parse_ao3_result_list(html)
+    #for rl in result_list:
+    #    print(rl)
+    #    print()
+
+if __name__ == "__main__":
+    main()
 
 
 # def main(argv):
