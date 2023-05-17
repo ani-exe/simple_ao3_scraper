@@ -54,6 +54,12 @@ def _request_ao3(url, page=1):
             print(str(e))
 
 
+def _stat_parse_helper(stat_object, class_name):
+    find_stat = stat_object.find('dd', class_=class_name)
+    find_stat = int(find_stat.text.replace(',', '')) if find_stat else 0
+    return find_stat
+
+
 def _parse_ao3_result_list(html_str):
     """
     Uses beautiful soup to transform html into json with relevant metadata.
@@ -78,10 +84,50 @@ def _parse_ao3_result_list(html_str):
         rating = tag_lis[0].a.text
         warnings = tag_lis[1].a.text.split(', ')
         category = tag_lis[2].a.text.split(', ')
-        iswip = tag_lis[3].a.text == "Work in Progress"
+        is_wip = tag_lis[3].a.text == "Work in Progress"
+
+        last_updated = header.find('p', class_="datetime").text
+        # so fucking annoying i can't get more specific timestamp here todo ani look into that
 
         tags_commas = work.find('ul', class_="tags commas")
-        print(tags_commas)
+        relationships = tags_commas.find_all('li', class_="relationships")
+        is_slash = False
+        if relationships:
+            relationships = [r.a.text for r in relationships]
+            is_slash = True if any('/' in r for r in relationships) else False
+        freeforms = tags_commas.find_all('li', class_="freeforms")
+        if freeforms:
+            freeforms = [f.a.text for f in freeforms]
+        
+        summary = work.find('blockquote', class_="userstuff summary")
+        # todo ani: do i care about breaking this down? contains links? etc etc
+        
+        #series = work.find('ul', class_="series")
+        # find example of multiple series work for testing
+        # they are all li in a ul e.g:
+        #<ul class="series">
+        #<li>
+        #  Part <strong>1</strong> of <a href="/series/1756675">Off to the Races</a>
+        #</li>
+        #</ul>
+        # todo ani collect whether or not the work is in a series
+        # do i care??? maybe????
+
+        stats_all = work.find('dl', class_="stats")
+        language = stats_all.find('dd', class_="language").text
+        words = _stat_parse_helper(stats_all, 'words')
+        
+        chapters = stats_all.find('dd', class_="chapters").text.split('/')
+        cur_chapters = int(chapters[0].replace(',', ''))
+        intended_chapters = chapters[1]
+
+        
+        kudos = _stat_parse_helper(stats_all, 'kudos')
+        hits = _stat_parse_helper(stats_all, 'hits')
+        comments = _stat_parse_helper(stats_all, 'comments')
+        collections = _stat_parse_helper(stats_all, 'collections')
+        # todo ani do i care about the collection meta???? not sure?? need example
+        bookmarks = _stat_parse_helper(stats_all, 'bookmarks')
 
         jsons.append({
             "title": title,
@@ -90,7 +136,21 @@ def _parse_ao3_result_list(html_str):
             "rating": rating,
             "warnings": warnings,
             "category": category,
-            "iswip": iswip,
+            "iswip": is_wip,
+            "lastUpdated": last_updated,
+            "relationships": relationships,
+            "isslash": is_slash,
+            "freeforms": freeforms,
+            "summary": summary,
+            "language": language,
+            "words": words,
+            "currentChapters": cur_chapters,
+            "intendedChapters": intended_chapters,
+            "kudos": kudos,
+            "hits": hits,
+            "comments": comments,
+            "bookmarks": bookmarks,
+            "collections": collections,
         })
 
     return jsons
