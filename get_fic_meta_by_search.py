@@ -10,30 +10,6 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-"""
-i want an object like this, if possible:
-
-title: title
-description: desc
-author: author:
-id: id,
-rating: (G, T, M, E, N)
-relationships: (M/M, F/M, F/F, Multi, Other, Gen, None)
-warning: (Chose_Not_To_Warn, Warning, No_Warning, External)
-if_warning: (V, NC, U, MCD)
-pairing: [either a & b, or a/b]
-tags: [a, list, of, tags]
-word_count: ###
-chapter_count: ###
-kudos: ###
-hits: ###
-comments: ###
-finished: (t/f)
-date_published: timestamp
-date_updated: timestamp
-
-"""
-
 
 test_url = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=F&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=100&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=en&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
 
@@ -99,7 +75,7 @@ def _parse_ao3_result_list(html_str):
         if freeforms:
             freeforms = [f.a.text for f in freeforms]
         
-        summary = work.find('blockquote', class_="userstuff summary")
+        summary = work.find('blockquote', class_="userstuff summary").text
         # todo ani: do i care about breaking this down? contains links? etc etc
         
         #series = work.find('ul', class_="series")
@@ -157,17 +133,19 @@ def _parse_ao3_result_list(html_str):
 
 
 def main():
-    #r = requests.get(test_url)
+    r = requests.get(test_url)
+    html = r.text
     #with open('outfile', 'w', encoding='utf8') as f:
     #    f.write(r.text)
 
-    with open('outfile', 'r', encoding='utf8') as f:
-        html = f.read()
+    # with open('outfile', 'r', encoding='utf8') as f:
+    #     html = f.read()
 
     result_list = _parse_ao3_result_list(html)
-    #for rl in result_list:
-    #    print(rl)
-    #    print()
+    print(result_list)
+    
+    with open('outfile.json', 'w') as outfile:
+        json.dump({'data': result_list}, outfile,indent=4)
 
 if __name__ == "__main__":
     main()
