@@ -13,6 +13,8 @@ from bs4 import BeautifulSoup
 
 test_url = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=F&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=100&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=en&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
 
+test_url_contains_anonymous = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&include_work_search%5Brating_ids%5D%5B%5D=13&include_work_search%5Brelationship_ids%5D%5B%5D=10483645&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
+
 def _request_ao3(url, page=1):
     """
     Makes a request to ao3, returns structured metadata list.
@@ -48,23 +50,35 @@ def _parse_ao3_result_list(html_str):
 
     jsons = []
     for work in works:
+        
+        # basics
         header = work.div
-        link = header.h4.a
+        h4 = header.h4
+        link = h4.a
         author = link.find_next().text
         id_ = link.get('href')
         title = link.string
+        is_anon = False
+        is_orphan = 'orphan_account' == author
+        
+        # logic gets screwed up b/c anonymous doesn't link
+        # this is a hack, but orphan_account should just work since it links
+        if 'Anonymous' in h4.text and 'Anonymous' not in title:
+            is_anon = True
+            author = 'Anonymous'
 
+        # wrangle the required tags
         required_tags = header.find('ul', class_="required-tags")
-
         tag_lis = required_tags.find_all('li')
         rating = tag_lis[0].a.text
         warnings = tag_lis[1].a.text.split(', ')
         category = tag_lis[2].a.text.split(', ')
         is_wip = tag_lis[3].a.text == "Work in Progress"
 
+        # unfortunately, this is the best date we can do from search
         last_updated = header.find('p', class_="datetime").text
-        # so fucking annoying i can't get more specific timestamp here todo ani look into that
 
+        # wrangle the freeform tags
         tags_commas = work.find('ul', class_="tags commas")
         relationships = tags_commas.find_all('li', class_="relationships")
         is_slash = False
@@ -75,19 +89,26 @@ def _parse_ao3_result_list(html_str):
         if freeforms:
             freeforms = [f.a.text for f in freeforms]
         
-        summary = work.find('blockquote', class_="userstuff summary").text
-        # todo ani: do i care about breaking this down? contains links? etc etc
+        bq = work.find('blockquote', class_="userstuff summary")
+        summary = bq.text        
         
-        #series = work.find('ul', class_="series")
-        # find example of multiple series work for testing
-        # they are all li in a ul e.g:
-        #<ul class="series">
-        #<li>
-        #  Part <strong>1</strong> of <a href="/series/1756675">Off to the Races</a>
-        #</li>
-        #</ul>
-        # todo ani collect whether or not the work is in a series
-        # do i care??? maybe????
+        # gran series meta from summary and break it down
+        series = work.find('ul', class_="series")
+        is_series = False
+        all_series = []
+        if series:
+            is_series = True
+            series_ls = series.find_all('li')
+            for s in series_ls:
+                installment = int(s.strong.text.replace(',', '')) # wild if this is needed
+                series_id = s.a.get('href')
+                series_name = s.a.text
+                series_meta = {
+                    'installment': installment,
+                    'seriesId': series_id,
+                    'seriesName': series_name,
+                }
+                all_series.append(series_meta)
 
         stats_all = work.find('dl', class_="stats")
         language = stats_all.find('dd', class_="language").text
@@ -96,28 +117,34 @@ def _parse_ao3_result_list(html_str):
         chapters = stats_all.find('dd', class_="chapters").text.split('/')
         cur_chapters = int(chapters[0].replace(',', ''))
         intended_chapters = chapters[1]
-
         
+        # stats stuff
         kudos = _stat_parse_helper(stats_all, 'kudos')
         hits = _stat_parse_helper(stats_all, 'hits')
         comments = _stat_parse_helper(stats_all, 'comments')
         collections = _stat_parse_helper(stats_all, 'collections')
-        # todo ani do i care about the collection meta???? not sure?? need example
+        # i have decided that i do not care about collection meta
+        # but if i did, it would go here
         bookmarks = _stat_parse_helper(stats_all, 'bookmarks')
 
+        # put that shit together
         jsons.append({
             "title": title,
             "author": author,
+            "isAnon": is_anon,
+            "isOrphan": is_orphan,
             "id": id_,
             "rating": rating,
             "warnings": warnings,
             "category": category,
-            "iswip": is_wip,
+            "isWip": is_wip,
             "lastUpdated": last_updated,
             "relationships": relationships,
-            "isslash": is_slash,
+            "isSlash": is_slash,
             "freeforms": freeforms,
             "summary": summary,
+            "isSeries": is_series,
+            "seriesMeta": all_series,
             "language": language,
             "words": words,
             "currentChapters": cur_chapters,
@@ -133,16 +160,11 @@ def _parse_ao3_result_list(html_str):
 
 
 def main():
-    r = requests.get(test_url)
+    # todo ani, make this page
+    r = requests.get(test_url_contains_anonymous)
     html = r.text
-    #with open('outfile', 'w', encoding='utf8') as f:
-    #    f.write(r.text)
-
-    # with open('outfile', 'r', encoding='utf8') as f:
-    #     html = f.read()
 
     result_list = _parse_ao3_result_list(html)
-    print(result_list)
     
     with open('outfile.json', 'w') as outfile:
         json.dump({'data': result_list}, outfile,indent=4)
@@ -151,6 +173,7 @@ if __name__ == "__main__":
     main()
 
 
+# todo ani, commandline run logic with any search
 # def main(argv):
 #    search_url = ''
 #    outputfile = ''
