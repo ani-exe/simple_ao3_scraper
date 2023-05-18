@@ -7,7 +7,9 @@
 
 import sys, getopt, time
 import json
+import re
 import requests
+import urllib.parse
 from bs4 import BeautifulSoup
 
 
@@ -95,6 +97,31 @@ def _stat_parse_helper(stat_object, class_name):
         return find_stat
     else:   
         return 0
+    
+def _wrangle_relationship_tags(rel_list):
+    rel_tags = ('*s*', '*a*')
+    # todo slash is indicated in link with *s* and & with *a*
+    # so i can grab the relationships by url decoding the tags
+    # and replacing the symbols
+    # "/tags/Reigen%20Arataka*s*Serizawa%20Katsuya/works" eg
+    ret = []
+    is_slash = False
+    #[value for value in b if any(d in value for d in a)]
+    for r in rel_list:
+        a = r.a # keep this around if we'd rather use the text
+        href = urllib.parse.unquote(a.get('href'))
+        # decode the hrefs to normalize tags
+        if any(t in href for t in rel_tags):
+            split = href.split('/')[2]
+            pair_str = split.replace('*a*', '&').replace('*s*', '/')
+            is_slash = '/' in pair_str
+            ret.append(pair_str)
+        else:
+            # just append the text
+            ret.append(a.text)
+
+
+    return is_slash, ret
 
 
 def _parse_ao3_result_list(html_str):
@@ -141,13 +168,13 @@ def _parse_ao3_result_list(html_str):
         # unfortunately, this is the best date we can do from search
         last_updated = header.find('p', class_="datetime").text
 
-        # wrangle the freeform tags
+        # wrangle all the tags
         tags_commas = work.find('ul', class_="tags commas")
         relationships = tags_commas.find_all('li', class_="relationships")
         is_slash = False
         if relationships:
-            relationships = [r.a.text for r in relationships]
-            is_slash = True if any('/' in r for r in relationships) else False
+            is_slash, relationships = _wrangle_relationship_tags(relationships)
+        
         freeforms = tags_commas.find_all('li', class_="freeforms")
         if freeforms:
             freeforms = [f.a.text for f in freeforms]
