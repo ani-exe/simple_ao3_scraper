@@ -9,7 +9,7 @@ import sys, getopt, time
 import json
 import re
 import requests
-import urllib.parse
+from urllib.parse import urlparse, unquote
 from bs4 import BeautifulSoup
 
 
@@ -31,7 +31,14 @@ in case someone publishes something new while i'm parsing and sets me off-by-one
 # Don't use for main stat collection
 test_url_contains_anonymous = "https://archiveofourown.org/works?commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&include_work_search%5Brating_ids%5D%5B%5D=13&include_work_search%5Brelationship_ids%5D%5B%5D=10483645&work_search%5Bother_tag_names%5D=&work_search%5Bexcluded_tag_names%5D=&work_search%5Bcrossover%5D=&work_search%5Bcomplete%5D=&work_search%5Bwords_from%5D=&work_search%5Bwords_to%5D=&work_search%5Bdate_from%5D=&work_search%5Bdate_to%5D=&work_search%5Bquery%5D=&work_search%5Blanguage_id%5D=&tag_id=%E3%83%A2%E3%83%96%E3%82%B5%E3%82%A4%E3%82%B3100+%7C+Mob+Psycho+100"
 
+works_base_url= "https://archiveofourown.org{}"
+
+with open ('canonical_tags.json', 'r') as f:
+    ctjson = json.load(f)
+
 unique_ids = set()
+canonical_tag_ids = set(ctjson['list'])
+print(canonical_tag_ids)
 
 def process_ao3_loop():
 
@@ -42,7 +49,7 @@ def process_ao3_loop():
 
     # todo ani, update this later to allow contributed url, not just base
 
-    page = 1
+    page = 310
     full_results_list = []
     while True: 
         page_param = '&page={page}'.format(page=page)
@@ -51,7 +58,7 @@ def process_ao3_loop():
         res = _request_ao3(url_with_page)
         full_results_list += res
         
-        if not res or len(res) < 20:
+        if not res: # we might dedupe some items so checking num items isn't accurate
             print('last page is', page)
             break # should mean we're done here
         
@@ -99,20 +106,45 @@ def _stat_parse_helper(stat_object, class_name):
         return 0
     
 def _wrangle_relationship_tags(rel_list):
+    global canonical_tag_ids
     rel_tags = ('*s*', '*a*')
     # todo slash is indicated in link with *s* and & with *a*
     # so i can grab the relationships by url decoding the tags
     # and replacing the symbols
     # "/tags/Reigen%20Arataka*s*Serizawa%20Katsuya/works" eg
+    # sigh we got stuck at 310
+    # need exponential backoff
+    # and need to write out the json even if we fail
+    # todo ani
     ret = []
     is_slash = False
     #[value for value in b if any(d in value for d in a)]
     for r in rel_list:
         a = r.a # keep this around if we'd rather use the text
-        href = urllib.parse.unquote(a.get('href'))
+        href = a.get('href')
+        if href not in canonical_tag_ids:
+            print(href, 'not found in canonical tags, checking')
+            # we need to find out if the tag is canonical so we can dedupe
+            # build the url to check for redirect
+            check_url = works_base_url.format(href)
+            time.sleep(5)
+            req = requests.get(check_url)
+            if req.history and req.url != check_url:
+                # then we did a redirect and the url where we ended should be canonical
+                unfurled_url = urlparse(req.url).path
+                canonical_tag_ids.add(unfurled_url)
+                href = unfurled_url
+
+            else:
+                # we have the terimunus and a 200
+                canonical_tag_ids.add(href)
+        else:
+            print(href, 'was in canonical tags, continue')
+
+        href_decoded = unquote(href)
         # decode the hrefs to normalize tags
-        if any(t in href for t in rel_tags):
-            split = href.split('/')[2]
+        if any(t in href_decoded for t in rel_tags):
+            split = href_decoded.split('/')[2]
             pair_str = split.replace('*a*', '&').replace('*s*', '/')
             is_slash = '/' in pair_str
             ret.append(pair_str)
@@ -121,6 +153,7 @@ def _wrangle_relationship_tags(rel_list):
             ret.append(a.text)
 
 
+    print(canonical_tag_ids)
     return is_slash, ret
 
 
