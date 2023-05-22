@@ -49,7 +49,7 @@ def process_ao3_loop():
 
     # todo ani, update this later to allow contributed url, not just base
 
-    page = 310
+    page = 1
     full_results_list = []
     while True: 
         page_param = '&page={page}'.format(page=page)
@@ -105,6 +105,31 @@ def _stat_parse_helper(stat_object, class_name):
     else:   
         return 0
     
+def _wrangle_relationship_tags_request(url):
+    # yes i know this is ugly and repetitive don't look at me
+    success = False
+    allowable_tries = 3 #if exceeds this, just give up
+    tries = 0
+
+    while not success:
+        if tries >= allowable_tries:
+            break
+        try:
+            time.sleep(5) #need to wait 5 secs before req ao3 per TOS
+            tries += 1
+            r = requests.get(url)
+            if r.status_code not in (200,301):
+                success = False
+                print("Failed to GET, trying again", url)
+            else:
+                return r
+        except Exception as e:
+            print(str(e))
+    
+    print(r.status_code)
+    print(r.text)
+    sys.exit("something went horribly wrong with tag wrangling, pls fix it")
+    
 def _wrangle_relationship_tags(rel_list):
     global canonical_tag_ids
     rel_tags = ('*s*', '*a*')
@@ -127,8 +152,7 @@ def _wrangle_relationship_tags(rel_list):
             # we need to find out if the tag is canonical so we can dedupe
             # build the url to check for redirect
             check_url = works_base_url.format(href)
-            time.sleep(5)
-            req = requests.get(check_url)
+            req = _wrangle_relationship_tags_request(check_url)
             if req.history and req.url != check_url:
                 # then we did a redirect and the url where we ended should be canonical
                 unfurled_url = urlparse(req.url).path
@@ -152,8 +176,6 @@ def _wrangle_relationship_tags(rel_list):
             # just append the text
             ret.append(a.text)
 
-
-    print(canonical_tag_ids)
     return is_slash, ret
 
 
