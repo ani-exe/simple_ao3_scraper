@@ -230,6 +230,10 @@ def _parse_ao3_result_list(html_str):
         if relationships:
             is_slash, relationships = _wrangle_relationship_tags(relationships)
         
+        characters = tags_commas.find_all('li', class_="characters")
+        if characters:
+            characters = [c.a.text for c in characters] #should we wrangle? let's make that a problem for future ani
+        
         freeforms = tags_commas.find_all('li', class_="freeforms")
         if freeforms:
             freeforms = [f.a.text for f in freeforms]
@@ -286,6 +290,7 @@ def _parse_ao3_result_list(html_str):
             "lastUpdated": last_updated,
             "relationships": relationships,
             "isSlash": is_slash,
+            "characters": characters,
             "freeforms": freeforms,
             "summary": summary,
             "isSeries": is_series,
